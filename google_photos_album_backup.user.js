@@ -7,6 +7,8 @@
 // @license     MIT
 // @run-at      document-idle
 // @grant       none
+// @homepageURL https://github.com/lokster/Google-Photos-Album-Backup
+// @downloadURL https://github.com/lokster/Google-Photos-Album-Backup/raw/master/google_photos_album_backup.user.js
 // ==/UserScript==
 
 (function() {
