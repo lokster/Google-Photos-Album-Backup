@@ -1082,14 +1082,7 @@
       button.setAttribute('aria-label', title);
       button.setAttribute('aria-disabled', 'false');
       button.setAttribute('tabindex', '0');
-      button.setAttribute('data-tooltip', title);
-      button.setAttribute('aria-haspopup', 'true');
-      button.setAttribute('aria-expanded', 'false');
-      button.setAttribute('data-dynamic', 'true');
-      button.setAttribute('data-alignright', 'true');
-      button.setAttribute('data-aligntop', 'true');
-      button.setAttribute('data-tooltip-vertical-offset', '-12');
-      button.setAttribute('data-tooltip-horizontal-offset', '0');
+      button.setAttribute('title', title);
       button.innerHTML = `
         <div class="NWlf3e MbhUzd" jsname="ksKsZd"></div>
         <span jsslot="" class="MhXXcc oJeWuf">
