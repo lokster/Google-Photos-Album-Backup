@@ -6,7 +6,7 @@
 // @match       *://photos.google.com/*
 // @license     MIT
 // @run-at      document-idle
-// @grant       none
+// @grant       GM_registerMenuCommand
 // @homepageURL https://github.com/lokster/Google-Photos-Album-Backup
 // @downloadURL https://github.com/lokster/Google-Photos-Album-Backup/raw/master/google_photos_album_backup.user.js
 // ==/UserScript==
@@ -1101,20 +1101,25 @@
       return button;
     };
 
-    const exportButton = createButton(exportIcon, 'Export Albums');
-    exportButton.onclick = () => {
+    // Open dialog functions
+    const openExport = () => {
       exportPopup.style.display = 'flex';
       overlay.style.display = 'block';
-      exportLogger.clear();
+      resetExportState();
     };
 
-    const importButton = createButton(importIcon, 'Import Albums');
-    importButton.onclick = () => {
+    const openImport = () => {
       importPopup.style.display = 'flex';
       overlay.style.display = 'block';
     };
 
-    return { exportButton, importButton };
+    const exportButton = createButton(exportIcon, 'Export Albums');
+    exportButton.onclick = openExport;
+
+    const importButton = createButton(importIcon, 'Import Albums');
+    importButton.onclick = openImport;
+
+    return { exportButton, importButton, openExport, openImport };
   }
 
   // Insert buttons next to GPTK button
@@ -1144,8 +1149,12 @@
     await waitForGptk();
     console.log('[Album Backup] GPTK detected, initializing...');
 
-    const { exportButton, importButton } = createUI();
+    const { exportButton, importButton, openExport, openImport } = createUI();
     insertButtons(exportButton, importButton);
+
+    // Register menu commands
+    GM_registerMenuCommand('Export Albums', openExport);
+    GM_registerMenuCommand('Import Albums', openImport);
 
     console.log('[Album Backup] Ready');
   }
