@@ -617,16 +617,12 @@
     let pageId = null;
     let currentTs = endTs;
 
-    function timestampToDate(ts) {
-      return new Date(ts / 1000);
-    }
-
     do {
       const page = await gptkApi.getItemsByTakenDate(currentTs, null, pageId, 500, true);
 
       if (page.items?.length > 0) {
-        const firstDate = timestampToDate(page.items[0].timestamp).toISOString().split('T')[0];
-        const lastDate = timestampToDate(page.items[page.items.length - 1].timestamp).toISOString().split('T')[0];
+        const firstDate = tsToDate(page.items[0].timestamp).toISOString().split('T')[0];
+        const lastDate = tsToDate(page.items[page.items.length - 1].timestamp).toISOString().split('T')[0];
 
         const filtered = page.items.filter(item =>
           item.timestamp >= startTs && item.timestamp <= endTs
