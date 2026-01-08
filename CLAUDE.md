@@ -73,3 +73,7 @@ Photos are uniquely identified by `fileName` + `timestamp` (microseconds). This 
 - All Google Photos API calls are made through `gptkApi`
 - Album fetching is cached to avoid duplicate API calls during import
 - Concurrent request limits are configurable via `MAX_CONCURRENT_REQUESTS`
+
+## Git Workflow
+
+- **Always ask the user for confirmation before running `git commit` and `git push`**
