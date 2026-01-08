@@ -579,7 +579,14 @@
       return;
     }
 
-    logger.log(`Date range from JSON: ${new Date(startTs / 1000).toISOString()} to ${new Date(endTs / 1000).toISOString()}`);
+    // Helper to convert timestamp to Date (auto-detect unit)
+    const tsToDate = (ts) => {
+      if (ts > 1e15) return new Date(ts / 1000);      // Microseconds
+      if (ts > 1e12) return new Date(ts);             // Milliseconds
+      return new Date(ts * 1000);                     // Seconds
+    };
+
+    logger.log(`Date range from JSON: ${tsToDate(startTs).toISOString()} to ${tsToDate(endTs).toISOString()}`);
 
     // Album cache
     const albumCache = new Map();
@@ -590,6 +597,7 @@
       let pageId = null;
       do {
         const page = await gptkApi.getAlbums(pageId, 100, true);
+        if (!page) break;
         if (page.items?.length > 0) {
           for (const album of page.items) {
             if (album.title) {
