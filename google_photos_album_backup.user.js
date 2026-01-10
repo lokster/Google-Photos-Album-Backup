@@ -280,6 +280,45 @@
       margin-top: 0;
     }
 
+    .aei-select-group {
+      margin: 16px 0;
+      padding: 12px;
+      background: #303134;
+      border-radius: 4px;
+    }
+
+    .aei-select-group label {
+      display: block;
+      color: #9aa0a6;
+      font-size: 12px;
+      margin-bottom: 8px;
+    }
+
+    .aei-select-group select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #3c4043;
+      border-radius: 4px;
+      background: #202124;
+      color: #e8eaed;
+      font-size: 14px;
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%239aa0a6'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+    }
+
+    .aei-select-group select:focus {
+      outline: none;
+      border-color: #8ab4f8;
+    }
+
+    .aei-select-group select option {
+      background: #303134;
+      color: #e8eaed;
+    }
+
     /* Responsive adjustments for smaller screens */
     @media (max-width: 500px) {
       .aei-popup {
@@ -387,24 +426,15 @@
     }
   }
 
-  // Timestamp utilities
-  function getTimestampUnit(ts) {
-    if (ts > 1e15) return 'microseconds';
-    if (ts > 1e12) return 'milliseconds';
-    return 'seconds';
+  // Timestamp utilities - normalize everything to milliseconds for consistency
+  function normalizeToMs(ts) {
+    if (ts > 1e15) return ts / 1000;      // Microseconds to ms
+    if (ts > 1e12) return ts;              // Already milliseconds
+    return ts * 1000;                       // Seconds to ms
   }
 
-  function dateToTimestamp(dateStr, unit) {
-    const ms = new Date(dateStr).getTime();
-    if (unit === 'microseconds') return ms * 1000;
-    if (unit === 'milliseconds') return ms;
-    return Math.floor(ms / 1000);
-  }
-
-  function timestampToDate(ts, unit) {
-    if (unit === 'microseconds') return new Date(ts / 1000);
-    if (unit === 'milliseconds') return new Date(ts);
-    return new Date(ts * 1000);
+  function timestampToDate(ts) {
+    return new Date(normalizeToMs(ts));
   }
 
   // Export function
@@ -413,36 +443,35 @@
 
     logger.log('Starting export...', 'info');
 
-    // Detect timestamp format
-    const sample = await gptkApi.getItemsByTakenDate(null, null, null, 5, true);
-    const unit = sample.items?.[0] ? getTimestampUnit(sample.items[0].timestamp) : 'microseconds';
-    logger.log(`Timestamp unit: ${unit}`);
-
-    const startTs = dateToTimestamp(startDate, unit);
-    const endTs = dateToTimestamp(endDate + 'T23:59:59', unit);
+    // Convert date range to milliseconds for comparison
+    const startMs = new Date(startDate).getTime();
+    const endMs = new Date(endDate + 'T23:59:59.999').getTime();
 
     // Fetch all items in date range
     logger.log(`Fetching photos from ${startDate} to ${endDate}...`);
 
     let allItems = [];
     let pageId = null;
-    let currentTs = endTs;
+    let currentTs = null; // Start from most recent (null = no upper bound initially)
 
     do {
       const page = await gptkApi.getItemsByTakenDate(currentTs, null, pageId, 500, true);
 
       if (page.items?.length > 0) {
-        const firstDate = timestampToDate(page.items[0].timestamp, unit).toISOString().split('T')[0];
-        const lastDate = timestampToDate(page.items[page.items.length - 1].timestamp, unit).toISOString().split('T')[0];
+        const firstDate = timestampToDate(page.items[0].timestamp).toISOString().split('T')[0];
+        const lastDate = timestampToDate(page.items[page.items.length - 1].timestamp).toISOString().split('T')[0];
 
-        const filtered = page.items.filter(item =>
-          item.timestamp >= startTs && item.timestamp <= endTs
-        );
+        // Filter using normalized milliseconds for consistent comparison
+        const filtered = page.items.filter(item => {
+          const itemMs = normalizeToMs(item.timestamp);
+          return itemMs >= startMs && itemMs <= endMs;
+        });
 
         allItems.push(...filtered);
         logger.log(`Page: ${lastDate} to ${firstDate}, ${filtered.length} in range. Total: ${allItems.length}`);
 
-        if (page.lastItemTimestamp && page.lastItemTimestamp < startTs) break;
+        // Check if we've gone past the start date (using normalized comparison)
+        if (page.lastItemTimestamp && normalizeToMs(page.lastItemTimestamp) < startMs) break;
       }
 
       pageId = page.nextPageId;
@@ -515,8 +544,8 @@
     const albumCount = Object.keys(albums).length;
 
     const exportData = {
-      start_timestamp: startTs,
-      end_timestamp: endTs,
+      start_timestamp: startMs * 1000,  // Save as microseconds for compatibility
+      end_timestamp: endMs * 1000,
       albums: albums
     };
 
@@ -543,10 +572,24 @@
   }
 
   // Import function
-  async function runImport(jsonData, logger) {
+  // matchMode: 'exact' | 'seconds' | 'filename'
+  async function runImport(jsonData, logger, matchMode = 'seconds') {
     const MAX_CONCURRENT_REQUESTS = 20;
 
     logger.log('Starting import...', 'info');
+    const modeDescriptions = {
+      'exact': 'filename + timestamp (exact)',
+      'seconds': 'filename + timestamp (to seconds)',
+      'filename': 'filename only'
+    };
+    logger.log(`Matching mode: ${modeDescriptions[matchMode] || matchMode}`);
+
+    // Helper to normalize timestamp to seconds
+    const normalizeToSeconds = (ts) => {
+      if (ts > 1e15) return Math.floor(ts / 1000000); // Microseconds to seconds
+      if (ts > 1e12) return Math.floor(ts / 1000);    // Milliseconds to seconds
+      return ts;                                       // Already seconds
+    };
 
     // Read timestamps and albums from JSON structure
     const startTs = jsonData.start_timestamp;
@@ -558,6 +601,10 @@
       return;
     }
 
+    // Normalize timestamps to milliseconds for comparison
+    const startMs = normalizeToMs(startTs);
+    const endMs = normalizeToMs(endTs);
+
     const albumEntries = Object.entries(albumsData);
     logger.log(`Loaded ${albumEntries.length} albums from JSON`);
 
@@ -567,7 +614,13 @@
 
     for (const [albumName, photos] of albumEntries) {
       for (const [fileName, timestamp] of photos) {
-        uniquePhotos.add(`${fileName}|${timestamp}`);
+        if (matchMode === 'exact') {
+          uniquePhotos.add(`${fileName}|${timestamp}`);
+        } else if (matchMode === 'seconds') {
+          uniquePhotos.add(`${fileName}|${normalizeToSeconds(timestamp)}`);
+        } else {
+          uniquePhotos.add(fileName);
+        }
         totalMemberships++;
       }
     }
@@ -579,14 +632,7 @@
       return;
     }
 
-    // Helper to convert timestamp to Date (auto-detect unit)
-    const tsToDate = (ts) => {
-      if (ts > 1e15) return new Date(ts / 1000);      // Microseconds
-      if (ts > 1e12) return new Date(ts);             // Milliseconds
-      return new Date(ts * 1000);                     // Seconds
-    };
-
-    logger.log(`Date range from JSON: ${tsToDate(startTs).toISOString()} to ${tsToDate(endTs).toISOString()}`);
+    logger.log(`Date range from JSON: ${timestampToDate(startTs).toISOString()} to ${timestampToDate(endTs).toISOString()}`);
 
     // Album cache
     const albumCache = new Map();
@@ -615,23 +661,26 @@
 
     let allItems = [];
     let pageId = null;
-    let currentTs = endTs;
+    let currentTs = null; // Start from most recent
 
     do {
       const page = await gptkApi.getItemsByTakenDate(currentTs, null, pageId, 500, true);
 
       if (page.items?.length > 0) {
-        const firstDate = tsToDate(page.items[0].timestamp).toISOString().split('T')[0];
-        const lastDate = tsToDate(page.items[page.items.length - 1].timestamp).toISOString().split('T')[0];
+        const firstDate = timestampToDate(page.items[0].timestamp).toISOString().split('T')[0];
+        const lastDate = timestampToDate(page.items[page.items.length - 1].timestamp).toISOString().split('T')[0];
 
-        const filtered = page.items.filter(item =>
-          item.timestamp >= startTs && item.timestamp <= endTs
-        );
+        // Filter using normalized milliseconds for consistent comparison
+        const filtered = page.items.filter(item => {
+          const itemMs = normalizeToMs(item.timestamp);
+          return itemMs >= startMs && itemMs <= endMs;
+        });
 
         allItems.push(...filtered);
         logger.log(`Page: ${lastDate} to ${firstDate}, ${filtered.length} in range. Total: ${allItems.length}`);
 
-        if (page.lastItemTimestamp && page.lastItemTimestamp < startTs) break;
+        // Check if we've gone past the start date (using normalized comparison)
+        if (page.lastItemTimestamp && normalizeToMs(page.lastItemTimestamp) < startMs) break;
       }
 
       pageId = page.nextPageId;
@@ -683,11 +732,23 @@
     // Match photos and build album -> mediaKeys mapping
     logger.log('Matching photos with import data...');
 
-    // Build lookup: uniqueId -> mediaKey
+    // Build lookup based on matching mode
     const photoLookup = new Map();
     for (const item of itemsWithInfo) {
-      const uniqueId = `${item.fileName}|${item.timestamp}`;
-      photoLookup.set(uniqueId, item.mediaKey);
+      let key;
+      if (matchMode === 'exact') {
+        key = `${item.fileName}|${item.timestamp}`;
+      } else if (matchMode === 'seconds') {
+        key = `${item.fileName}|${normalizeToSeconds(item.timestamp)}`;
+      } else {
+        key = item.fileName;
+      }
+
+      // For all modes, collect all matching mediaKeys (handles duplicates)
+      if (!photoLookup.has(key)) {
+        photoLookup.set(key, []);
+      }
+      photoLookup.get(key).push(item.mediaKey);
     }
 
     const albumToPhotos = new Map();
@@ -698,19 +759,28 @@
       const mediaKeys = [];
 
       for (const [fileName, timestamp] of photos) {
-        const uniqueId = `${fileName}|${timestamp}`;
-        const mediaKey = photoLookup.get(uniqueId);
-
-        if (mediaKey) {
-          mediaKeys.push(mediaKey);
-          matchedPhotos.add(uniqueId);
+        let key;
+        if (matchMode === 'exact') {
+          key = `${fileName}|${timestamp}`;
+        } else if (matchMode === 'seconds') {
+          key = `${fileName}|${normalizeToSeconds(timestamp)}`;
         } else {
-          notFoundPhotos.add(uniqueId);
+          key = fileName;
+        }
+
+        const keys = photoLookup.get(key);
+
+        if (keys && keys.length > 0) {
+          mediaKeys.push(...keys);
+          matchedPhotos.add(key);
+        } else {
+          notFoundPhotos.add(key);
         }
       }
 
       if (mediaKeys.length > 0) {
-        albumToPhotos.set(albumName, mediaKeys);
+        // Deduplicate mediaKeys in case same photo appears multiple times
+        albumToPhotos.set(albumName, [...new Set(mediaKeys)]);
       }
     }
 
@@ -747,44 +817,40 @@
     }
     logger.log(`Created ${createdCount} new albums`);
 
-    // Add photos to albums (parallel)
+    // Add photos to albums (sequential, max 500 per request)
     logger.log('Adding photos to albums...', 'info');
 
+    const BATCH_SIZE = 500;
     let successCount = 0;
     let errorCount = 0;
 
-    {
-      const promisePool = new Set();
-
-      for (const [albumName, mediaKeys] of albumToPhotos) {
-        const albumMediaKey = albumCache.get(albumName);
-        if (!albumMediaKey) {
-          logger.log(`Album "${albumName}" not found in cache, skipping`, 'error');
-          errorCount += mediaKeys.length;
-          continue;
-        }
-
-        while (promisePool.size >= MAX_CONCURRENT_REQUESTS) {
-          await Promise.race(promisePool);
-        }
-
-        const promise = gptkApi.addItemsToAlbum(mediaKeys, albumMediaKey)
-          .then(() => {
-            logger.log(`✓ Added ${mediaKeys.length} photos to "${albumName}"`, 'success');
-            successCount += mediaKeys.length;
-          })
-          .catch((e) => {
-            logger.log(`✗ Error adding to "${albumName}": ${e}`, 'error');
-            errorCount += mediaKeys.length;
-          })
-          .finally(() => {
-            promisePool.delete(promise);
-          });
-
-        promisePool.add(promise);
+    for (const [albumName, mediaKeys] of albumToPhotos) {
+      const albumMediaKey = albumCache.get(albumName);
+      if (!albumMediaKey) {
+        logger.log(`Album "${albumName}" not found in cache, skipping`, 'error');
+        errorCount += mediaKeys.length;
+        continue;
       }
 
-      await Promise.all(promisePool);
+      // Split mediaKeys into batches of BATCH_SIZE
+      const batches = [];
+      for (let i = 0; i < mediaKeys.length; i += BATCH_SIZE) {
+        batches.push(mediaKeys.slice(i, i + BATCH_SIZE));
+      }
+
+      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+        const batch = batches[batchIndex];
+        const batchLabel = batches.length > 1 ? ` (batch ${batchIndex + 1}/${batches.length})` : '';
+
+        try {
+          await gptkApi.addItemsToAlbum(batch, albumMediaKey);
+          logger.log(`✓ Added ${batch.length} photos to "${albumName}"${batchLabel}`, 'success');
+          successCount += batch.length;
+        } catch (e) {
+          logger.log(`✗ Error adding to "${albumName}"${batchLabel}: ${e}`, 'error');
+          errorCount += batch.length;
+        }
+      }
     }
 
     logger.log('========== SUMMARY ==========', 'info');
@@ -820,6 +886,20 @@
       </div>
       <p class="aei-description">Saves album membership for all photos in the selected date range to a JSON file. Photos are identified by filename + timestamp combination, which remains consistent even after restoring from Google Takeout.</p>
       <div id="aei-export-form">
+        <div class="aei-select-group">
+          <label for="aei-year-select">Quick select year</label>
+          <select id="aei-year-select">
+            <option value="">Custom date range</option>
+            ${(() => {
+              const currentYear = new Date().getFullYear();
+              let options = '';
+              for (let y = currentYear; y >= 2000; y--) {
+                options += `<option value="${y}">${y}</option>`;
+              }
+              return options;
+            })()}
+          </select>
+        </div>
         <div class="aei-form-group">
           <label>Start Date</label>
           <input type="date" id="aei-start-date" value="${new Date().toISOString().split('T')[0]}">
@@ -870,7 +950,7 @@
         <h2 class="aei-popup-title">Import Albums</h2>
         <button class="aei-close-btn">${closeIcon}</button>
       </div>
-      <p class="aei-description">Restores album membership from a previously exported JSON file. Matches photos by filename + timestamp, creates any missing albums, and adds photos back to their original albums.</p>
+      <p class="aei-description">Restores album membership from a previously exported JSON file. Creates any missing albums and adds photos back to their original albums.</p>
       <div class="aei-import-prompt" id="aei-import-prompt">
         <p>Select a JSON file exported from "Export Albums"</p>
         <button class="aei-btn aei-btn-primary" id="aei-select-file-btn">Select JSON File</button>
@@ -896,6 +976,14 @@
             <span class="aei-stat-value" id="aei-stat-end-date">-</span>
             <span class="aei-stat-label">End Date</span>
           </div>
+        </div>
+        <div class="aei-select-group">
+          <label for="aei-match-mode">Photo matching mode</label>
+          <select id="aei-match-mode">
+            <option value="seconds">Filename + timestamp (to seconds)</option>
+            <option value="exact">Filename + timestamp (exact)</option>
+            <option value="filename">Filename only</option>
+          </select>
         </div>
         <div class="aei-button-row">
           <button class="aei-btn aei-btn-secondary" id="aei-change-file-btn">Change File</button>
@@ -948,6 +1036,23 @@
       closeImport();
     };
 
+    // Year selector handler
+    document.getElementById('aei-year-select').onchange = (e) => {
+      const year = e.target.value;
+      if (year) {
+        document.getElementById('aei-start-date').value = `${year}-01-01`;
+        document.getElementById('aei-end-date').value = `${year}-12-31`;
+      }
+    };
+
+    // Reset year selector when dates are manually changed
+    document.getElementById('aei-start-date').onchange = () => {
+      document.getElementById('aei-year-select').value = '';
+    };
+    document.getElementById('aei-end-date').onchange = () => {
+      document.getElementById('aei-year-select').value = '';
+    };
+
     // Export button handler
     document.getElementById('aei-export-btn').onclick = async () => {
       const startDate = document.getElementById('aei-start-date').value;
@@ -995,20 +1100,9 @@
     // New Export button handler
     document.getElementById('aei-export-new-btn').onclick = resetExportState;
 
-    // Helper to format date from timestamp (auto-detect unit)
+    // Helper to format date from timestamp
     const formatDate = (timestamp) => {
-      let ms;
-      if (timestamp > 1e15) {
-        // Microseconds
-        ms = timestamp / 1000;
-      } else if (timestamp > 1e12) {
-        // Milliseconds
-        ms = timestamp;
-      } else {
-        // Seconds
-        ms = timestamp * 1000;
-      }
-      const date = new Date(ms);
+      const date = timestampToDate(timestamp);
       return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
     };
 
@@ -1067,12 +1161,14 @@
     document.getElementById('aei-import-btn').onclick = async () => {
       if (!pendingImportData) return;
 
+      const matchMode = document.getElementById('aei-match-mode').value;
+
       // Hide preview, show log
       document.getElementById('aei-file-preview').style.display = 'none';
       document.getElementById('aei-import-log').style.display = 'block';
 
       try {
-        await runImport(pendingImportData, importLogger);
+        await runImport(pendingImportData, importLogger, matchMode);
       } catch (err) {
         importLogger.log(`Error: ${err}`, 'error');
       }
