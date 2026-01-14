@@ -452,7 +452,7 @@
 
     let allItems = [];
     let pageId = null;
-    let currentTs = null; // Start from most recent (null = no upper bound initially)
+    let currentTs = endMs * 1000; // Start from end date (convert to microseconds for API)
 
     do {
       const page = await gptkApi.getItemsByTakenDate(currentTs, null, pageId, 500, true);
@@ -661,7 +661,7 @@
 
     let allItems = [];
     let pageId = null;
-    let currentTs = null; // Start from most recent
+    let currentTs = endTs; // Start from the end date in the JSON file
 
     do {
       const page = await gptkApi.getItemsByTakenDate(currentTs, null, pageId, 500, true);
