@@ -490,6 +490,7 @@
     const itemsWithInfo = [];
     let fetchCompleted = 0;
 
+    const allPromises = [];
     const promisePool = new Set();
 
     for (const item of allItems) {
@@ -513,9 +514,11 @@
         });
 
       promisePool.add(promise);
+      allPromises.push(promise);
     }
 
-    await Promise.all(promisePool);
+    // Wait for ALL promises, not just those remaining in the pool
+    await Promise.all(allPromises);
     logger.log(`Fetched info for ${itemsWithInfo.length} items`);
 
     // Build album-centric JSON structure
@@ -647,7 +650,7 @@
         if (page.items?.length > 0) {
           for (const album of page.items) {
             if (album.title) {
-              albumCache.set(album.title, album.mediaKey);
+              albumCache.set(album.title, { mediaKey: album.mediaKey, isShared: album.isShared });
             }
           }
         }
@@ -700,6 +703,7 @@
     let fetchCompleted = 0;
 
     {
+      const allPromises = [];
       const promisePool = new Set();
 
       for (const item of allItems) {
@@ -723,9 +727,11 @@
           });
 
         promisePool.add(promise);
+        allPromises.push(promise);
       }
 
-      await Promise.all(promisePool);
+      // Wait for ALL promises, not just those remaining in the pool
+      await Promise.all(allPromises);
     }
     logger.log(`Fetched info for ${itemsWithInfo.length} items`);
 
@@ -795,8 +801,10 @@
 
     // Show albums to process
     for (const [albumName, mediaKeys] of albumToPhotos) {
-      const exists = albumCache.has(albumName);
-      logger.log(`${exists ? '✓' : '+'} "${albumName}" - ${mediaKeys.length} photos ${exists ? '(exists)' : '(will create)'}`);
+      const albumInfo = albumCache.get(albumName);
+      const exists = !!albumInfo;
+      const sharedTag = albumInfo?.isShared ? ' [shared]' : '';
+      logger.log(`${exists ? '✓' : '+'} "${albumName}"${sharedTag} - ${mediaKeys.length} photos ${exists ? '(exists)' : '(will create)'}`);
     }
 
     // Create missing albums
@@ -809,7 +817,7 @@
       try {
         logger.log(`Creating album: "${albumName}"`);
         const mediaKey = await gptkApi.createAlbum(albumName);
-        albumCache.set(albumName, mediaKey);
+        albumCache.set(albumName, { mediaKey: mediaKey, isShared: false });
         createdCount++;
       } catch (e) {
         logger.log(`Error creating album "${albumName}": ${e}`, 'error');
@@ -825,8 +833,8 @@
     let errorCount = 0;
 
     for (const [albumName, mediaKeys] of albumToPhotos) {
-      const albumMediaKey = albumCache.get(albumName);
-      if (!albumMediaKey) {
+      const albumInfo = albumCache.get(albumName);
+      if (!albumInfo) {
         logger.log(`Album "${albumName}" not found in cache, skipping`, 'error');
         errorCount += mediaKeys.length;
         continue;
@@ -843,7 +851,12 @@
         const batchLabel = batches.length > 1 ? ` (batch ${batchIndex + 1}/${batches.length})` : '';
 
         try {
-          await gptkApi.addItemsToAlbum(batch, albumMediaKey);
+          // Use appropriate function based on whether album is shared
+          if (albumInfo.isShared) {
+            await gptkApi.addItemsToSharedAlbum(batch, albumInfo.mediaKey);
+          } else {
+            await gptkApi.addItemsToAlbum(batch, albumInfo.mediaKey);
+          }
           logger.log(`✓ Added ${batch.length} photos to "${albumName}"${batchLabel}`, 'success');
           successCount += batch.length;
         } catch (e) {
