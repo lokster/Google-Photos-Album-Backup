@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Google Photos Album Backup
 // @description Backup and restore album membership for Google Photos
-// @version     1.0.0
+// @version     1.1.0
 // @author      lokster
 // @match       *://photos.google.com/*
 // @license     MIT
