@@ -452,7 +452,7 @@
 
     let allItems = [];
     let pageId = null;
-    let currentTs = endMs * 1000; // Start from end date (convert to microseconds for API)
+    let currentTs = endMs; // Start from end date (milliseconds)
 
     do {
       const page = await gptkApi.getItemsByTakenDate(currentTs, null, pageId, 500, true);
