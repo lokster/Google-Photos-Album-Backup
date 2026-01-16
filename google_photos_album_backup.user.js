@@ -544,8 +544,8 @@
     const albumCount = Object.keys(albums).length;
 
     const exportData = {
-      start_timestamp: startMs * 1000,  // Save as microseconds for compatibility
-      end_timestamp: endMs * 1000,
+      start_timestamp: startMs,  // Milliseconds
+      end_timestamp: endMs,
       albums: albums
     };
 
